@@ -1,128 +1,251 @@
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:452087541.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:2702517424.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:1264873441.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:2144928064.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:1768963559.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:507080721.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:1272624249.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:1503143485.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:3424593029.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:3146064476.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:1028258965.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:1346208544.
+// Suggested code may be subject to a license. Learn more: ~LicenseLog:3995212880.
 import express from 'express';
-import { MongoClient } from 'mongodb';
-import bodyParser from 'body-parser';
-import dotenv from 'dotenv';
+import { generate } from 'randomstring';
+import { MongoClient, ServerApiVersion } from 'mongodb';
+import * as dotenv from 'dotenv';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
+
 const app = express();
+app.use(express.json());
+// Replace the placeholder with your actual connection string
+const uri = process.env.MONGO_URI;
+if(!uri) console.error("MONGO_URI not found in env files")
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
+});
 
-// MongoDB connection
-const mongoUri = process.env.MONGO_URI;
-let client;
-
-if (mongoUri) {
-    client = new MongoClient(mongoUri);
-    client.connect()
-    .then(() => console.log('Connected successfully to MongoDB server'))
-    .catch(err => console.error('Error connecting to MongoDB:', err));
+async function connectToDatabase() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    await client.connect();
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 });
+    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    return client;
+  } finally {
     
+  }
 }
 
-app.use(bodyParser.json());
+connectToDatabase().then((connectedClient) => {
 
-const port = parseInt(process.env.PORT) || 3000;
-app.listen(port, () => {
-  console.log(`listening on port ${port}`);
+  const transporter = nodemailer.createTransport({
+      service: 'gmail',
+    auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_PASS,
+      },
+      // host: process.env.EMAIL_HOST,
+      // port: process.env.EMAIL_PORT,
+      // secure: true,
+      // auth: {
+      //   user: process.env.EMAIL_USER,
+      //   pass: process.env.EMAIL_PASS,
+  });
+
+  transporter.verify().then(() => {
+    console.log('SMTP server is ready to take our messages');
+  }).catch(err => {
+    console.error('Error verifying transporter:', err);
+  });
+    
+    app.post('/forgot-password', async (req, res) => {
+      const { email } = req.body;
+      try {
+          const usersCollection = connectedClient.db('eventplanning').collection("users");
+          const user = await usersCollection.findOne({ email });
+          if (!user) {
+              return res.status(404).json({ message: 'User not found' });
+          }
+          const otp = generate({ length: 6, charset: 'numeric' });
+          const passwordResetSessions = connectedClient.db('eventplanning').collection("password-reset-sessions");
+          await passwordResetSessions.insertOne({ email, otp, createdAt: new Date() });
+          
+          
+          const mailOptions = {
+            from: `"Mental Health App" <${process.env.GMAIL_USER}>`,
+            to: email,
+            subject: 'Password Reset OTP',
+            html: `<p>Your OTP for password reset is: <strong>${otp}</strong></p>
+                    <p>This OTP is valid for 2 minutes.</p>`,
+          };
+
+          transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+              console.error('Error sending email:', error);
+              res.status(500).json({ message: 'Error sending email' });
+              return;
+            }
+            console.log('Email sent:', info.response);
+            
+            
+          });
+          
+          
+          res.status(200).json({ message: 'OTP sent successfully', email: email });
+      } catch (error) {
+          console.error("Error sending OTP:", error);
+          res.status(500).json({ message: 'Error sending OTP' });
+      }
+    });
+
+    app.post('/verify-otp', async (req, res) => {
+      const { email, otp } = req.body;
+      try {
+          const passwordResetSessions = connectedClient.db('eventplanning').collection("password-reset-sessions");
+          const session = await passwordResetSessions.findOne({ email, otp, createdAt: { $gte: new Date(Date.now() - 2 * 60 * 1000) } }); // Check if OTP is within 2 minutes
+          if (!session) {
+              return res.status(400).json({ message: 'Invalid or expired OTP' });
+          }
+          await passwordResetSessions.deleteOne({ email, otp }); // Delete the session after verification
+          res.status(200).json({ message: 'OTP verified successfully' });
+      } catch (error) {
+          console.error("Error verifying OTP:", error);
+          res.status(500).json({ message: 'Error verifying OTP' });
+      }
+    });
+    app.post('/reset-password', async (req, res) => {
+        const { email, newPassword } = req.body;
+        try {
+            const usersCollection = connectedClient.db('eventplanning').collection("users");
+            await usersCollection.updateOne({ email }, { $set: { password: newPassword } });
+            res.status(200).json({ message: 'Password reset successfully' });
+        } catch(error) {
+            console.error("Error resetting password:", error);
+            res.status(500).json({ message: 'Error resetting password' });
+        }
+    });
+    app.post('/login', async (req, res) => {
+        const { email, password } = req.body;
+        try {
+            const usersCollection = connectedClient.db('eventplanning').collection("users");
+            const user = await usersCollection.findOne({ email });
+            if (!user || user.password !== password) {
+                return res.status(401).json({ message: 'Invalid email or password' });
+            }
+            
+            res.status(200).json({ message: 'Logged in successfully', userid: user._id });
+        } catch(error) {
+            console.error("Error logging in:", error);
+            res.status(500).json({ message: 'Error logging in' });
+        }
+    });
+
+
+    app.post('/signup', async (req, res) => {
+        const { name, email, password } = req.body;
+        
+        try {
+            const usersCollection = connectedClient.db('eventplanning').collection("users");
+            const existingUser = await usersCollection.findOne({ email });
+            if (existingUser) {
+                return res.status(409).json({ message: 'User with this email already exists' });
+            }
+
+            const result = await usersCollection.insertOne({ name, email, password });
+            res.status(201).json({ message: 'User created',  userId: result.insertedId });
+        } catch (error) {
+            console.error("Error creating user:", error);
+            res.status(500).json({ message: 'Error creating user' });
+        }
+    });
+
+    // Create a new chat message
+    app.post('/chat', async (req, res) => {
+        const { chatSessionId, chatName, userId, message, role } = req.body;
+        try {
+            const chatsCollection = connectedClient.db('eventplanning').collection("chats");
+            const result = await chatsCollection.insertOne({ chatSessionId, chatName, userId, message, role, createdAt: new Date() });
+            res.status(201).json({ message: 'Message created', messageId: result.insertedId });
+        } catch (error) {
+            console.error("Error creating message:", error);
+            res.status(500).json({ message: 'Error creating message' });
+        }
+    });
+
+    // Get chats by user ID
+    app.get('/chats/:userId', async (req, res) => {
+      const { userId } = req.params;
+      try {
+          const chatsCollection = connectedClient.db('eventplanning').collection("chats");
+          const chats = await chatsCollection.aggregate([
+              { $match: { userId: userId } },
+              { $sort: { createdAt: -1 } }, // Sort by the timestamp of the last message in descending order
+              {
+                  $group: {
+                      _id: "$chatSessionId", // Group by chatSessionId to get unique chats
+                      chatName: { $first: "$chatName" },
+                  }
+              },
+              { $project: { _id: 0, chatSessionId: "$_id", chatName: 1 } } // Reshape the result to have chatName and chatSessionId
+          ]).toArray();
+          res.status(200).json(chats);
+      } catch (error) {
+          console.error("Error retrieving chats:", error);
+          res.status(500).json({ message: 'Error retrieving chats' });
+      }
+    });
+    // Get all messages for a chat session
+    app.get('/chat/:chatSessionId', async (req, res) => {
+        const { chatSessionId } = req.params;
+        try {
+            const chatsCollection = connectedClient.db('eventplanning').collection("chats");
+            const messages = await chatsCollection.find({ chatSessionId }).sort({ createdAt: 1 }).toArray();
+            res.status(200).json(messages);
+        } catch (error) {
+            console.error("Error retrieving messages:", error);
+            res.status(500).json({ message: 'Error retrieving messages' });
+        }
+    });
+
+    // Delete all messages for a chat session
+    app.delete('/chat/:chatSessionId', async (req, res) => {
+        const { chatSessionId } = req.params;
+        try {
+            const chatsCollection = connectedClient.db('eventplanning').collection("chats");
+
+            // Check if any messages exist for the given chatSessionId
+            const messageCount = await chatsCollection.countDocuments({ chatSessionId });
+            if (messageCount === 0) {
+                return res.status(404).json({ message: 'No messages found for this chat session ID' });
+            }
+
+            // Delete all messages with the given chatSessionId
+            const result = await chatsCollection.deleteMany({ chatSessionId });
+            res.status(200).json({ message: `Deleted ${result.deletedCount} messages` });
+        } catch (error) {
+            console.error("Error deleting messages:", error);
+            res.status(500).json({ message: 'Error deleting messages' });
+        }
+    });
 });
 
 app.get('/', (req, res) => {
-    const name = process.env.NAME || 'World';
-    res.send(`Hello ${name}!`);
+  const name = process.env.NAME || 'World';
+  res.send(`Hello ${name}!`);
 });
 
-
-app.post('/signup', async (req, res) => {
-    const { name, email, password } = req.body;
-    if (!name || !email || !password) {
-        return res.status(400).send('Name, email, and password are required');
-    }
-    try {
-        const db = client.db('eventplanning');
-        const users = db.collection('users');
-        const newUser = { name, email, password };
-        const result = await users.insertOne(newUser);
-        console.log(`New user created with id: ${result.insertedId}`);
-        res.status(201).send(`User created with ID: ${result.insertedId}`);
-    }
-     catch (err) {
-        console.error('Error creating user:', err);
-        res.status(500).send('Error creating user');
-    }
-});
-
-app.post('/login', async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-        return res.status(400).send('Email and password are required');
-    }
-
-    try {
-        const db = client.db('eventplanning');
-        const users = db.collection('users');
-        const user = await users.findOne({ email, password });
-
-        if (user) {
-            console.log(`User logged in: ${email}`);
-            res.status(200).send('Login successful');
-        } else {
-            res.status(401).send('Invalid email or password');
-        }
-    } catch (err) {
-        console.error('Error logging in:', err);
-        res.status(500).send('Error logging in');
-    }
-});
-
-app.post('/chat', async (req, res) => {
-    const { chatSectionId,chatName, role, message } = req.body;
-    if (!chatSectionId || !role || !message) {
-        return res.status(400).send('chatSectionId, chatName, role, and message are required');
-    }
-    try {
-        const db = client.db('eventplanning');
-        const chats = db.collection('chats');
-        const newChat = { chatSectionId, chatName, role, message };
-        const result = await chats.insertOne(newChat);
-        console.log(`New chat created with id: ${result.insertedId}`);
-        res.status(201).send(`Chat created with ID: ${result.insertedId}`);
-    }
-    catch (err) {
-        console.error('Error creating chat:', err);
-        res.status(500).send('Error creating chat');
-    }
-});
-
-app.get('/chat/:chatSectionId', async (req, res) => {
-    const chatSectionId = req.params.chatSectionId;
-    if (!chatSectionId) {
-        return res.status(400).send('chatSectionId is required');
-    }
-    try {
-        const db = client.db('eventplanning');
-        const chats = db.collection('chats');
-        const chatList = await chats.find({ chatSectionId }).toArray();
-
-        if (chatList) {
-            console.log(`Chat list for chatSectionId: ${chatSectionId}`);
-            res.status(200).json(chatList);
-        } else {
-            res.status(404).send('Chat not found');
-        }
-    } catch (err) {
-        console.error('Error getting chats:', err);
-        res.status(500).send('Error getting chats');
-    }
-});
-
-app.delete('/chat/:chatSectionId', async (req, res) => {
-    const chatSectionId = req.params.chatSectionId;
-    try {
-        const db = client.db('eventplanning');
-        const chats = db.collection('chats');
-        await chats.deleteMany({ chatSectionId });
-        res.status(200).send(`All messages deleted with chatSectionId: ${chatSectionId}`);
-    } catch (err) {
-        res.status(500).send('Error deleting chat');
-    }
+const port = parseInt(process.env.PORT || '3000');
+app.listen(port, () => {
+  console.log(`listening on port ${port}`);
 });
