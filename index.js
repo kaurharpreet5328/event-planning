@@ -245,13 +245,14 @@ connectToDatabase().then((connectedClient) => {
             res.status(500).json({ message: 'Error deleting messages' });
         }
     });
-});
 
+    
 app.post('/event', async (req, res) => {
-    const { userId, datetime, event_entry } = req.body;
+    const { userId, title, event_entry } = req.body;
+    const datetime = Datetime.now();
     try {
         const eventsCollection = connectedClient.db('event_planning_app').collection("events");
-        const result = await eventsCollection.insertOne({ userId, datetime, event_entry });
+        const result = await eventsCollection.insertOne({ userId, title, datetime: datetime, event_entry });
         res.status(201).json({ message: 'Event entry created', entryId: result.insertedId });
     } catch (error) {
         console.error("Error creating event entry:", error);
@@ -262,10 +263,11 @@ app.post('/event', async (req, res) => {
 
 app.put('/event/:entryId', async (req, res) => {
     const { entryId } = req.params;
-    const { userId, datetime, event_entry } = req.body;
+    const datetime = Datetime.now();
+    const { userId, title, event_entry } = req.body;
     try {
         const eventsCollection = connectedClient.db('event_planning_app').collection("events");
-        const result = await eventsCollection.updateOne({ _id: new ObjectId(entryId) }, { $set: { userId, datetime, event_entry } });
+        const result = await eventsCollection.updateOne({ _id: new ObjectId(entryId) }, { $set: { userId, title, datetime: datetime, event_entry } });
         if (result.matchedCount === 0) {
             return res.status(404).json({ message: 'Event entry not found' });
         }
@@ -305,6 +307,8 @@ app.delete('/event/:entryId', async (req, res) => {
     }
 });
 
+
+});
 
 
 
