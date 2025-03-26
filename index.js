@@ -1,6 +1,6 @@
 import express from 'express';
 import { generate } from 'randomstring';
-import { MongoClient, ServerApiVersion } from 'mongodb';
+import { MongoClient, ServerApiVersion, ObjectId } from 'mongodb';
 import * as dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import cors from 'cors';
@@ -61,13 +61,13 @@ connectToDatabase().then((connectedClient) => {
     app.post('/forgot-password', async (req, res) => {
         const { email } = req.body;
         try {
-            const usersCollection = connectedClient.db('event_planning_app').collection("users");
+            const usersCollection = connectedClient.db('event_planner_app').collection("users");
             const user = await usersCollection.findOne({ email });
             if (!user) {
                 return res.status(404).json({ message: 'User not found' });
             }
             const otp = generate({ length: 6, charset: 'numeric' });
-            const passwordResetSessions = connectedClient.db('event_planning_app').collection("password-reset-sessions");
+            const passwordResetSessions = connectedClient.db('event_planner_app').collection("password-reset-sessions");
             await passwordResetSessions.insertOne({ email, otp, createdAt: new Date() });
 
 
@@ -101,7 +101,7 @@ connectToDatabase().then((connectedClient) => {
     app.post('/verify-otp', async (req, res) => {
         const { email, otp } = req.body;
         try {
-            const passwordResetSessions = connectedClient.db('event_planning_app').collection("password-reset-sessions");
+            const passwordResetSessions = connectedClient.db('event_planner_app').collection("password-reset-sessions");
             const session = await passwordResetSessions.findOne({ email, otp, createdAt: { $gte: new Date(Date.now() - 2 * 60 * 1000) } }); // Check if OTP is within 2 minutes
             if (!session) {
                 return res.status(400).json({ message: 'Invalid or expired OTP' });
@@ -116,7 +116,7 @@ connectToDatabase().then((connectedClient) => {
     app.post('/reset-password', async (req, res) => {
         const { email, newPassword } = req.body;
         try {
-            const usersCollection = connectedClient.db('event_planning_app').collection("users");
+            const usersCollection = connectedClient.db('event_planner_app').collection("users");
             await usersCollection.updateOne({ email }, { $set: { password: newPassword } });
             res.status(200).json({ message: 'Password reset successfully' });
         } catch (error) {
@@ -127,7 +127,7 @@ connectToDatabase().then((connectedClient) => {
     app.post('/login', async (req, res) => {
         const { email, password } = req.body;
         try {
-            const usersCollection = connectedClient.db('event_planning_app').collection("users");
+            const usersCollection = connectedClient.db('event_planner_app').collection("users");
             const user = await usersCollection.findOne({ email });
             if (!user || user.password !== password) {
                 return res.status(401).json({ message: 'Invalid email or password' });
@@ -145,7 +145,7 @@ connectToDatabase().then((connectedClient) => {
         const { name, email, password } = req.body;
 
         try {
-            const usersCollection = connectedClient.db('event_planning_app').collection("users");
+            const usersCollection = connectedClient.db('event_planner_app').collection("users");
             const existingUser = await usersCollection.findOne({ email });
             if (existingUser) {
                 return res.status(409).json({ message: 'User with this email already exists' });
@@ -163,7 +163,7 @@ connectToDatabase().then((connectedClient) => {
     app.post('/chat', async (req, res) => {
         const { chatSessionId, chatName, userId, message, role } = req.body;
         try {
-            const chatsCollection = connectedClient.db('event_planning_app').collection("chats");
+            const chatsCollection = connectedClient.db('event_planner_app').collection("chats");
             const result = await chatsCollection.insertOne({ chatSessionId, chatName, userId, message, role, createdAt: new Date() });
             res.status(201).json({ message: 'Message created', messageId: result.insertedId });
         } catch (error) {
@@ -176,7 +176,7 @@ connectToDatabase().then((connectedClient) => {
     app.get('/chats/:userId', async (req, res) => {
         const { userId } = req.params;
         try {
-            const chatsCollection = connectedClient.db('event_planning_app').collection("chats");
+            const chatsCollection = connectedClient.db('event_planner_app').collection("chats");
             const chats = await chatsCollection.aggregate([
                 { $match: { userId: userId } },
                 { $sort: { createdAt: -1 } }, // Sort by the timestamp of the last message in descending order
@@ -201,7 +201,7 @@ connectToDatabase().then((connectedClient) => {
     app.get('/chat/:chatSessionId', async (req, res) => {
         const { chatSessionId } = req.params;
         try {
-            const chatsCollection = connectedClient.db('event_planning_app').collection("chats");
+            const chatsCollection = connectedClient.db('event_planner_app').collection("chats");
             const messages = await chatsCollection.find({ chatSessionId }).toArray();
             res.status(200).json(messages);
         } catch (error) {
@@ -215,7 +215,7 @@ connectToDatabase().then((connectedClient) => {
         const { chatSessionId } = req.params;
         const { newChatName } = req.body;
         try {
-            const chatsCollection = connectedClient.db('event_planning_app').collection("chats");
+            const chatsCollection = connectedClient.db('event_planner_app').collection("chats");
             const result = await chatsCollection.updateMany({ chatSessionId }, { $set: { chatName: newChatName } });
             res.status(200).json({ message: `Updated ${result.modifiedCount} messages with new chat name`, chatSessionId: chatSessionId, newChatName: newChatName });
         } catch (error) {
@@ -229,7 +229,7 @@ connectToDatabase().then((connectedClient) => {
     app.delete('/chat/:chatSessionId', async (req, res) => {
         const { chatSessionId } = req.params;
         try {
-            const chatsCollection = connectedClient.db('event_planning_app').collection("chats");
+            const chatsCollection = connectedClient.db('event_planner_app').collection("chats");
 
             // Check if any messages exist for the given chatSessionId
             const messageCount = await chatsCollection.countDocuments({ chatSessionId });
@@ -246,71 +246,65 @@ connectToDatabase().then((connectedClient) => {
         }
     });
 
+    app.post('/event', async (req, res) => {
+        const { userId, title, event_entry } = req.body;
+        const datetime = new Date();
+        try {
+            const eventsCollection = connectedClient.db('event_planner_app').collection("events");
+            const result = await eventsCollection.insertOne({ userId, title, event_entry, datetime });
+            res.status(201).json({ message: 'Event entry created', entryId: result.insertedId });
+        } catch (error) {
+            console.error("Error creating event entry:", error);
+            res.status(500).json({ message: 'Error creating event entry. '+error });
+        }
+    });
     
-app.post('/event', async (req, res) => {
-    const { userId, title, event_entry } = req.body;
-    const datetime = Datetime.now();
-    try {
-        const eventsCollection = connectedClient.db('event_planning_app').collection("events");
-        const result = await eventsCollection.insertOne({ userId, title, datetime: datetime, event_entry });
-        res.status(201).json({ message: 'Event entry created', entryId: result.insertedId });
-    } catch (error) {
-        console.error("Error creating event entry:", error);
-        res.status(500).json({ message: 'Error creating event entry' });
-    }
-});
-
-
-app.put('/event/:entryId', async (req, res) => {
-    const { entryId } = req.params;
-    const datetime = Datetime.now();
-    const { userId, title, event_entry } = req.body;
-    try {
-        const eventsCollection = connectedClient.db('event_planning_app').collection("events");
-        const result = await eventsCollection.updateOne({ _id: new ObjectId(entryId) }, { $set: { userId, title, datetime: datetime, event_entry } });
-        if (result.matchedCount === 0) {
-            return res.status(404).json({ message: 'Event entry not found' });
+    
+    app.put('/event/:entryId', async (req, res) => {
+        const { entryId } = req.params;
+        const { userId, title, event_entry } = req.body;
+        try {
+            const eventsCollection = connectedClient.db('event_planner_app').collection("events");
+            const result = await eventsCollection.updateOne({ _id: new ObjectId(entryId) }, { $set: { userId, title, event_entry } });
+            if (result.matchedCount === 0) {
+                return res.status(404).json({ message: 'Event entry not found' });
+            }
+            res.status(200).json({ message: 'Event entry updated', entryId: entryId });
+        } catch (error) {
+            console.error("Error updating event entry:", error);
+            res.status(500).json({ message: 'Error updating event entry' });
         }
-        res.status(200).json({ message: 'Event entry updated', entryId: entryId });
-    } catch (error) {
-        console.error("Error updating event entry:", error);
-        res.status(500).json({ message: 'Error updating event entry' });
-    }
-});
-
-
-
-app.get('/events/:userId', async (req, res) => {
-    const { userId } = req.params;
-    try {
-        const eventsCollection = connectedClient.db('event_planning_app').collection("events");
-        const events = await eventsCollection.find({ userId }).toArray();
-        res.status(200).json(events);
-    } catch (error) {
-        console.error("Error retrieving events:", error);
-        res.status(500).json({ message: 'Error retrieving events' });
-    }
-});
-
-app.delete('/event/:entryId', async (req, res) => {
-    const { entryId } = req.params;
-    try {
-        const eventsCollection = connectedClient.db('event_planning_app').collection("events");
-        const result = await eventsCollection.deleteOne({ _id: new ObjectId(entryId) });
-        if (result.deletedCount === 0) {
-            return res.status(404).json({ message: 'Event entry not found' });
+    });
+    
+    
+    
+    app.get('/events/:userId', async (req, res) => {
+        const { userId } = req.params;
+        try {
+            const eventsCollection = connectedClient.db('event_planner_app').collection("events");
+            const events = await eventsCollection.find({ userId }).toArray();
+            res.status(200).json(events);
+        } catch (error) {
+            console.error("Error retrieving events:", error);
+            res.status(500).json({ message: 'Error retrieving events' });
         }
-        res.status(200).json({ message: 'Event entry deleted', entryId: entryId });
-    } catch (error) {
-        console.error("Error deleting event entry:", error);
-        res.status(500).json({ message: 'Error deleting event entry' });
-    }
+    });
+    
+    app.delete('/event/:entryId', async (req, res) => {
+        const { entryId } = req.params;
+        try {
+            const eventsCollection = connectedClient.db('event_planner_app').collection("events");
+            const result = await eventsCollection.deleteOne({ _id: new ObjectId(entryId) });
+            if (result.deletedCount === 0) {
+                return res.status(404).json({ message: 'event entry not found' });
+            }
+            res.status(200).json({ message: 'event entry deleted', entryId: entryId });
+        } catch (error) {
+            console.error("Error deleting event entry:", error);
+            res.status(500).json({ message: 'Error deleting event entry', error: error });
+        }
+    });
 });
-
-
-});
-
-
 
 app.get('/', (req, res) => {
     const name = process.env.NAME || 'World';
